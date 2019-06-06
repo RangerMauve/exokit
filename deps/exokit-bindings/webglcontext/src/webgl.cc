@@ -146,8 +146,21 @@ const char *stencilFsh = ""
 out vec4 fragColor;\n\
 \n\
 void main() {\n\
-  fragColor = vec4(0.0, 0.0, 0.0, 1.0);\n\
-  gl_fragDepth = 1.0;\n\
+  fragColor = vec4(1.0, 0.0, 0.0, 1.0);\n\
+}\n\
+";
+const char *stencilFsh2 = ""
+#ifdef ANDROID
+"#version 300 es\n"
+#else
+"#version 330\n"
+#endif
+"\n\
+out vec4 fragColor;\n\
+\n\
+void main() {\n\
+  fragColor = vec4(0.0, 0.0, 1.0, 1.0);\n\
+  gl_FragDepth = 1000.0;\n\
 }\n\
 ";
 
@@ -189,6 +202,20 @@ StencilGlShader::StencilGlShader() {
     exout << "stencil fragment shader compilation failed:\n" << infoLog << std::endl;
     return;
   };
+  
+  // fragment2 shader
+  GLuint stencilFragment2 = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(stencilFragment2, 1, &stencilFsh2, NULL);
+  glCompileShader(stencilFragment2);
+  glGetShaderiv(stencilFragment2, GL_COMPILE_STATUS, &success);
+  if (!success) {
+    char infoLog[4096];
+    GLsizei length;
+    glGetShaderInfoLog(stencilFragment2, sizeof(infoLog), &length, infoLog);
+    infoLog[length] = '\0';
+    exout << "stencil fragment 2 shader compilation failed:\n" << infoLog << std::endl;
+    return;
+  };
 
   // shader program
   this->stencilProgram = glCreateProgram();
@@ -202,6 +229,21 @@ StencilGlShader::StencilGlShader() {
     glGetShaderInfoLog(this->stencilProgram, sizeof(infoLog), &length, infoLog);
     infoLog[length] = '\0';
     exout << "stencil program linking failed\n" << infoLog << std::endl;
+    return;
+  }
+  
+  // shader program
+  this->stencilProgram2 = glCreateProgram();
+  glAttachShader(this->stencilProgram2, stencilVertex);
+  glAttachShader(this->stencilProgram2, stencilFragment2);
+  glLinkProgram(this->stencilProgram2);
+  glGetProgramiv(this->stencilProgram2, GL_LINK_STATUS, &success);
+  if (!success) {
+    char infoLog[4096];
+    GLsizei length;
+    glGetShaderInfoLog(this->stencilProgram2, sizeof(infoLog), &length, infoLog);
+    infoLog[length] = '\0';
+    exout << "stencil program 2 linking failed\n" << infoLog << std::endl;
     return;
   }
 
@@ -224,6 +266,7 @@ StencilGlShader::StencilGlShader() {
   // delete the shaders as they're linked into our program now and no longer necessary
   glDeleteShader(stencilVertex);
   glDeleteShader(stencilFragment);
+  glDeleteShader(stencilFragment2);
 
   glGenBuffers(1, &this->positionBuffer);
   glBindBuffer(GL_ARRAY_BUFFER, this->positionBuffer);
@@ -1368,7 +1411,7 @@ std::pair<Local<Object>, Local<FunctionTemplate>> WebGLRenderingContext::Initial
 
   Nan::SetMethod(proto, "setTopLevel", SetTopLevel);
   Nan::SetMethod(proto, "setTopStencilGeometry", SetTopStencilGeometry);
-  Nan::SetMethod(proto, "setTopClipPlanes", SetTopClipPlanes);
+  // Nan::SetMethod(proto, "setTopClipPlanes", SetTopClipPlanes);
 
   // OVR_multiview2
   Nan::SetMethod(proto, "framebufferTextureMultiviewOVR", glCallWrap<FramebufferTextureMultiviewOVR>);
@@ -2692,6 +2735,14 @@ NAN_METHOD(WebGLRenderingContext::SetDefaultFramebuffer) {
   gl->defaultFramebuffer = framebuffer;
 }
 
+/* void WebGLRenderingContext::PushDefaultFramebuffer(GLuint fbo) {
+  defaultFramebufferStack.push_back(defaultFramebuffer);
+}
+
+void WebGLRenderingContext::PopDefaultFramebuffer() {
+  defaultFramebufferStack.pop_back();
+} */
+
 NAN_METHOD(WebGLRenderingContext::SetTopLevel) {
   WebGLRenderingContext *gl = ObjectWrap::Unwrap<WebGLRenderingContext>(info.This());
   bool topLevel = TO_BOOL(info[0]);
@@ -2755,12 +2806,12 @@ NAN_METHOD(WebGLRenderingContext::SetTopStencilGeometry) {
     float *leftModelViewMatrixData = (float *)((char *)leftModelViewMatrixObj->Buffer()->GetContents().Data() + leftModelViewMatrixObj->ByteOffset());
     std::vector<float> leftModelViewMatrix(16);
     memcpy(leftModelViewMatrix.data(), leftModelViewMatrixData, leftModelViewMatrix.size() * sizeof(leftModelViewMatrix[0]));
-    leftModelViewMatrix = multiplyMatrices(portalOffsetMatrix, leftModelViewMatrix);
+    // leftModelViewMatrix = multiplyMatrices(portalOffsetMatrix, leftModelViewMatrix);
 
     float *rightModelViewMatrixData = (float *)((char *)rightModelViewMatrixObj->Buffer()->GetContents().Data() + rightModelViewMatrixObj->ByteOffset());
     std::vector<float> rightModelViewMatrix(16);
     memcpy(rightModelViewMatrix.data(), rightModelViewMatrixData, rightModelViewMatrix.size() * sizeof(rightModelViewMatrix[0]));
-    rightModelViewMatrix = multiplyMatrices(portalOffsetMatrix, rightModelViewMatrix);
+    // rightModelViewMatrix = multiplyMatrices(portalOffsetMatrix, rightModelViewMatrix);
 
     float *leftProjectionMatrixData = (float *)((char *)leftProjectionMatrixObj->Buffer()->GetContents().Data() + leftProjectionMatrixObj->ByteOffset());
     std::vector<float> leftProjectionMatrix(16);
@@ -2775,15 +2826,15 @@ NAN_METHOD(WebGLRenderingContext::SetTopStencilGeometry) {
     glBindVertexArray(stencilGlShader->stencilVao);
     glUseProgram(stencilGlShader->stencilProgram);
 
-    /* glBindBuffer(GL_ARRAY_BUFFER, stencilGlShader->positionBuffer);
-    glBufferData(GL_ARRAY_BUFFER, stencilGeometrySize*sizeof(float), stencilGeometryData, GL_DYNAMIC_DRAW); */
+    glBindBuffer(GL_ARRAY_BUFFER, stencilGlShader->positionBuffer);
+    // glBufferData(GL_ARRAY_BUFFER, stencilGeometrySize*sizeof(float), stencilGeometryData, GL_DYNAMIC_DRAW);
 
     glEnable(GL_STENCIL_TEST);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glDepthMask(GL_TRUE);
+    // glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    // glDepthMask(GL_FALSE);
     glStencilMask(0xFF);
     glStencilFunc(GL_ALWAYS, 1, 0xFF);
-    glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
+    glStencilOp(GL_ZERO, GL_ZERO, GL_REPLACE);
     glClear(GL_STENCIL_BUFFER_BIT);
 
     {
@@ -2791,6 +2842,17 @@ NAN_METHOD(WebGLRenderingContext::SetTopStencilGeometry) {
       glUniformMatrix4fv(stencilGlShader->projectionMatrixLocation, 1, false, leftProjectionMatrix.data());
 
       glViewport(0, 0, renderWidth, renderHeight);
+
+      glUseProgram(stencilGlShader->stencilProgram);
+      glEnable(GL_DEPTH_TEST);
+      glStencilMask(0xFF);
+      glStencilFunc(GL_ALWAYS, 1, 0xFF);
+      glDrawArrays(GL_TRIANGLES, 0, sizeof(PORTAL_POSITIONS)/sizeof(PORTAL_POSITIONS[0]));
+
+      glUseProgram(stencilGlShader->stencilProgram2);
+      glDisable(GL_DEPTH_TEST);
+      glStencilMask(0x00);
+      glStencilFunc(GL_EQUAL, 1, 0xFF);
       glDrawArrays(GL_TRIANGLES, 0, sizeof(PORTAL_POSITIONS)/sizeof(PORTAL_POSITIONS[0]));
     }
     {
@@ -2798,9 +2860,20 @@ NAN_METHOD(WebGLRenderingContext::SetTopStencilGeometry) {
       glUniformMatrix4fv(stencilGlShader->projectionMatrixLocation, 1, false, rightProjectionMatrix.data());
 
       glViewport(renderWidth, 0, renderWidth, renderHeight);
+
+      glUseProgram(stencilGlShader->stencilProgram);
+      glEnable(GL_DEPTH_TEST);
+      glStencilMask(0xFF);
+      glStencilFunc(GL_ALWAYS, 1, 0xFF);
       glDrawArrays(GL_TRIANGLES, 0, sizeof(PORTAL_POSITIONS)/sizeof(PORTAL_POSITIONS[0]));
+
+      /* glDisable(GL_DEPTH_TEST);
+      glStencilMask(0x00);
+      glStencilFunc(GL_EQUAL, 1, 0xFF);
+      glDrawArrays(GL_TRIANGLES, 0, sizeof(PORTAL_POSITIONS)/sizeof(PORTAL_POSITIONS[0])); */
     }
 
+    glEnable(GL_DEPTH_TEST);
     // glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     // glDepthMask(GL_TRUE);
     glStencilMask(0x00);
@@ -2820,6 +2893,11 @@ NAN_METHOD(WebGLRenderingContext::SetTopStencilGeometry) {
     } else {
       glUseProgram(0);
     }
+    if (gl->HasBufferBinding(GL_ARRAY_BUFFER)) {
+      glBindBuffer(GL_ARRAY_BUFFER, gl->GetBufferBinding(GL_ARRAY_BUFFER));
+    } else {
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
     if (gl->viewportState.valid) {
       glViewport(gl->viewportState.x, gl->viewportState.y, gl->viewportState.w, gl->viewportState.h);
     } else {
@@ -2830,7 +2908,7 @@ NAN_METHOD(WebGLRenderingContext::SetTopStencilGeometry) {
   }
 }
 
-NAN_METHOD(WebGLRenderingContext::SetTopClipPlanes) {
+/* NAN_METHOD(WebGLRenderingContext::SetTopClipPlanes) {
   WebGLRenderingContext *gl = ObjectWrap::Unwrap<WebGLRenderingContext>(info.This());
   int i = 0;
 
@@ -2858,7 +2936,7 @@ NAN_METHOD(WebGLRenderingContext::SetTopClipPlanes) {
   for (; i < 6; i++) {
     glDisable(GL_CLIP_PLANE0 + i);
   }
-}
+} */
 
 NAN_METHOD(WebGLRenderingContext::GetShaderParameter) {
   GLint shaderId = TO_INT32(JS_OBJ(info[0])->Get(JS_STR("id")));

@@ -363,7 +363,7 @@ public:
 
   static NAN_METHOD(SetTopLevel);
   static NAN_METHOD(SetTopStencilGeometry);
-  static NAN_METHOD(SetTopClipPlanes);
+  // static NAN_METHOD(SetTopClipPlanes);
 
   static NAN_METHOD(FramebufferTextureMultiviewOVR);
   static NAN_METHOD(FramebufferTextureMultisampleMultiviewOVR);
@@ -432,6 +432,7 @@ public:
   NATIVEwindow *windowHandle;
   GLuint defaultVao;
   GLuint defaultFramebuffer;
+  std::vector<GLuint> defaultFramebufferStack;
   GlObjectCache objectCache;
   bool topLevel;
   bool topStencilGeometry;
@@ -499,9 +500,11 @@ public:
 
   GLuint stencilVao;
   GLuint stencilProgram;
+  GLuint stencilProgram2;
   GLint positionLocation;
   GLint modelViewMatrixLocation;
   GLint projectionMatrixLocation;
+  GLint writeDepthLocation;
   GLuint positionBuffer;
 };
 

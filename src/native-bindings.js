@@ -1,5 +1,5 @@
 const path = require('path');
-const {isMainThread} = require('worker_threads');
+const {isMainThread, parentPort} = require('worker_threads');
 const {process} = global;
 
 const exokitNode = require(path.join(__dirname, '..', 'build', 'Release', 'exokit.node'));
@@ -78,7 +78,7 @@ const _onGl3DConstruct = (gl, canvas, attrs) => {
         // XXX also set title
         // const title = `Exokit ${GlobalContext.version}`;
 
-        const windowHandle = nativeWindow.createWindowHandle(canvasWidth, canvasHeight, contained && !hidden && !headless);
+        const windowHandle = nativeWindow.createWindowHandle(canvasWidth, canvasHeight, true);
         return nativeWindow.initWindow3D(windowHandle, gl);
       } catch (err) {
         console.warn(err.stack);
@@ -251,7 +251,14 @@ const _onGl3DConstruct = (gl, canvas, attrs) => {
       fbo,
       tex,
       depthTex,
+      width: canvasWidth,
+      height: canvasHeight,
     };
+    parentPort.postMessage({
+      method: 'emit',
+      type: 'framebuffer',
+      event: gl.framebuffer,
+    });
     gl.resize = (width, height) => {
       if (!gl.attrs.desynchronized && gl.framebuffer.type === 'canvas') {
         nativeWindow.setCurrentWindowContext(windowHandle);
@@ -265,7 +272,14 @@ const _onGl3DConstruct = (gl, canvas, attrs) => {
           fbo: newFbo,
           tex: newTex,
           depthTex: newDepthTex,
+          width,
+          height,
         };
+        parentPort.postMessage({
+          method: 'emit',
+          type: 'framebuffer',
+          event: gl.framebuffer,
+        });
       }
     };
 

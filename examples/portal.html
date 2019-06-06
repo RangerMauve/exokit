@@ -17,7 +17,24 @@
 <script>
 (() => {
 
-let container, scene, camera, session, controllerMeshes, layers;
+let container, scene, camera, session, controllerMeshes, layers, tutorialIframe, webxrSampleIframe, portalMesh, portalMesh2;
+const localVector = new THREE.Vector3();
+const localVector2 = new THREE.Vector3();
+const localQuaternion = new THREE.Quaternion();
+
+const stencilVsh = `
+  void main() {
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
+  }
+`;
+const stencilFsh = `
+  uniform sampler2D uTex;
+  uniform vec2 uTexSize;
+  void main() {
+    gl_FragColor = texture2D(uTex, gl_FragCoord.xy / uTexSize);
+    gl_FragColor.r += 0.2;
+  }
+`;
 
 function init() {
   container = document.createElement('div');
@@ -39,19 +56,104 @@ function init() {
   directionalLight.position.set(1, 1, 1);
   scene.add(directionalLight);
 
-  const tutorialIframe = document.createElement('iframe');
+  webxrSampleIframe = document.createElement('iframe');
+  // webxrSampleIframe.d = 3;
+  webxrSampleIframe.src = 'https://rawcdn.githack.com/exokitxr/webxr-samples/a8e2c94eba0ee5c9215f20d13057b6c25675d9b0/xr-presentation.html';
+  webxrSampleIframe.position = [0, 0, -1];
+  /* webxrSampleIframe.portalOffset.position.set(Float32Array.from([0, 1, 0]));
+  webxrSampleIframe.portalOffset.orientation.set(Float32Array.from([0, 0, 0, 1]));
+  webxrSampleIframe.portalOffset.scale.set(Float32Array.from([2, 2, 1])); */
+
+  tutorialIframe = document.createElement('iframe');
+  tutorialIframe.position = [0, 0, 1.1];
   // tutorialIframe.d = 3;
   tutorialIframe.src = 'tutorial.html';
 
-  const webxrSampleIframe = document.createElement('iframe');
-  // webxrSampleIframe.d = 3;
-  webxrSampleIframe.src = 'https://rawcdn.githack.com/exokitxr/webxr-samples/a8e2c94eba0ee5c9215f20d13057b6c25675d9b0/xr-presentation.html';
-  webxrSampleIframe.portalOffset.position.set(Float32Array.from([0, 1, 0]));
-  webxrSampleIframe.portalOffset.scale.set(Float32Array.from([1, 2, 1]));
+  const portalGeometry = (() => {
+    const g = new THREE.BoxBufferGeometry();
+    // g.applyMatrix(new THREE.Matrix4().makeTranslation(0, 0, -0.5));
+    ps = g.toNonIndexed().attributes.position.array;
+    ps2=[];
+    for (let i = 0; i < ps.length/9; i++) {
+      (ps[i*9+2] >= 0 && ps[i*9+2+3] >= 0 && ps[i*9+2+6] >= 0) || ps2.push.apply(ps2, ps.slice(i*9, (i+1)*9));
+    };
+    ps3 = new Float32Array(ps2.length);
+    for (let i = 0; i < ps2.length/9; i++) {
+      ps3[i*9] = ps2[i*9];
+      ps3[i*9+1] = ps2[i*9+1];
+      ps3[i*9+2] = ps2[i*9+2];
+
+      ps3[i*9+3] = ps2[i*9+6];
+      ps3[i*9+3+1] = ps2[i*9+6+1];
+      ps3[i*9+3+2] = ps2[i*9+6+2];
+
+      ps3[i*9+6] = ps2[i*9+3];
+      ps3[i*9+6+1] = ps2[i*9+3+1];
+      ps3[i*9+6+2] = ps2[i*9+3+2];
+    };
+    const geometry = new THREE.BufferGeometry();    
+    geometry.addAttribute('position', new THREE.BufferAttribute(ps3, 3));
+    return geometry;
+  })();
+  const _makePortalMesh = (position, quaternion, scale) => {
+    const geometry = portalGeometry;
+    const material = new THREE.ShaderMaterial({
+
+      uniforms: {
+        uTex: {
+          type: 't',
+          value: null,
+        },
+        uTexSize: {
+          type: 'v2',
+          value: new THREE.Vector2(),
+        },
+      },
+
+      vertexShader: stencilVsh,
+
+      fragmentShader: stencilFsh,
+
+      // depthWrite: false,
+
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(position);
+    mesh.quaternion.copy(quaternion);
+    mesh.scale.copy(scale);
+    mesh.box = new THREE.Box3().setFromCenterAndSize(mesh.position, mesh.scale);
+    return mesh;
+  };
+  portalMesh = _makePortalMesh(new THREE.Vector3(0, 0.9, 0), new THREE.Quaternion(), new THREE.Vector3(1, 2, 1));
+  portalMesh.visible = true;
+  scene.add(portalMesh);
+  portalMesh2 = _makePortalMesh(new THREE.Vector3(0, 0.9, 1), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)), new THREE.Vector3(1, 2, 1));
+  portalMesh2.visible = false;
+  scene.add(portalMesh2);
+
+  /* portalMesh2 = (() => {
+    const geometry = new THREE.PlaneBufferGeometry(3, 3);
+    const material = new THREE.MeshBasicMaterial({
+      // color: 0xFFFFFF,
+			map: new THREE.Texture(
+        null,
+        THREE.UVMapping,
+        THREE.ClampToEdgeWrapping,
+        THREE.ClampToEdgeWrapping,
+        THREE.LinearFilter,
+        THREE.LinearFilter,
+        THREE.RGBAFormat,
+        THREE.UnsignedByteType,
+        16
+      ),
+		});
+    return new THREE.Mesh(geometry, material);
+  })();
+  scene.add(portalMesh2); */
 
   layers = [
-    tutorialIframe,
     webxrSampleIframe,
+    // tutorialIframe,
   ];
 
   renderer = new THREE.WebGLRenderer({
@@ -69,6 +171,74 @@ function init() {
   renderer.setAnimationLoop(animate);
 }
 function animate(time, frame) {
+  if (webxrSampleIframe.contentWindow && webxrSampleIframe.contentWindow.framebuffer) {
+    const {tex, width, height} = webxrSampleIframe.contentWindow.framebuffer;
+    if (!portalMesh.material.uniforms.uTex.value) {
+      const texture = new THREE.Texture(
+        null,
+        THREE.UVMapping,
+        THREE.ClampToEdgeWrapping,
+        THREE.ClampToEdgeWrapping,
+        THREE.LinearFilter,
+        THREE.LinearFilter,
+        THREE.RGBAFormat,
+        THREE.UnsignedByteType,
+        16
+      );
+      const properties = renderer.properties.get(texture);
+      properties.__webglTexture = {
+        id: webxrSampleIframe.contentWindow.framebuffer.tex,
+      };
+      properties.__webglInit = true;
+
+      portalMesh.material.uniforms.uTex.value = texture;
+    }
+
+    portalMesh.material.uniforms.uTexSize.value.set(width, height);
+  }
+  if (tutorialIframe.contentWindow && tutorialIframe.contentWindow.framebuffer) {
+    const {tex, width, height} = tutorialIframe.contentWindow.framebuffer;
+    if (!portalMesh2.material.uniforms.uTex.value) {
+      const texture = new THREE.Texture(
+        null,
+        THREE.UVMapping,
+        THREE.ClampToEdgeWrapping,
+        THREE.ClampToEdgeWrapping,
+        THREE.LinearFilter,
+        THREE.LinearFilter,
+        THREE.RGBAFormat,
+        THREE.UnsignedByteType,
+        16
+      );
+      const properties = renderer.properties.get(texture);
+      properties.__webglTexture = {
+        id: tutorialIframe.contentWindow.framebuffer.tex,
+      };
+      properties.__webglInit = true;
+
+      portalMesh2.material.uniforms.uTex.value = texture;
+    }
+
+    portalMesh2.material.uniforms.uTexSize.value.set(width, height);
+  }
+
+  const vrCamera = renderer.vr.enabled ? renderer.vr.getCamera(camera).cameras[0] : camera;
+  vrCamera.matrixWorld.decompose(localVector, localQuaternion, localVector2);
+  if (portalMesh.visible && portalMesh.box.containsPoint(localVector)) {
+    layers.push(webxrSampleIframe);
+    portalMesh.visible = false;
+
+    layers.splice(layers.indexOf(tutorialIframe), 1);
+    portalMesh2.visible = true;
+  }
+  if (portalMesh2.visible && portalMesh2.box.containsPoint(localVector)) {
+    layers.push(tutorialIframe);
+    portalMesh2.visible = false;
+
+    layers.splice(layers.indexOf(webxrSampleIframe), 1);
+    portalMesh.visible = true;
+  }
+
   renderer.render(scene, renderer.vr.enabled ? renderer.vr.getCamera(camera) : camera);
 }
 

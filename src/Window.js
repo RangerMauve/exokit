@@ -1036,8 +1036,15 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
           vrPresentState.glContext.setDefaultFramebuffer(vrPresentState.fbo);
           nativeWindow.bindVrChildFbo(vrPresentState.glContext, vrPresentState.fbo, GlobalContext.xrState.tex[0], GlobalContext.xrState.depthTex[0]);
         }
+        
+        vrPresentState.glContext.setTopLevel(false);
       } else {
+        // console.log('bind non-layered', GlobalContext.id, vrPresentState.glContext.framebuffer.tex);
         vrPresentState.glContext.setDefaultFramebuffer(vrPresentState.glContext.framebuffer.msFbo);
+        nativeWindow.bindVrChildFbo(vrPresentState.glContext, vrPresentState.glContext.framebuffer.msFbo, vrPresentState.glContext.framebuffer.msTex, vrPresentState.glContext.framebuffer.msDepthTex);
+
+        vrPresentState.glContext.setTopLevel(true);
+        // nativeWindow.bindVrChildFbo(vrPresentState.glContext, vrPresentState.glContext.framebuffer.fbo, vrPresentState.glContext.framebuffer.tex, vrPresentState.glContext.framebuffer.depthTex);
       }
     }
   };
@@ -1061,13 +1068,11 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
       }
     }
   };
-  const _prepareLocalFrame = () => {
+  /* const _prepareLocalFrame = () => {
     if (vrPresentState.glContext) {
-      const {stencilGeometry} = window.document;
-      const stencilGeometrySize = stencilGeometry ? new Uint32Array(stencilGeometry.buffer, stencilGeometry.byteOffset, 1)[0] : 0;
-      if (stencilGeometrySize > 0) {
+      const {portalOffset} = window.document;
+      if (isFinite(portalOffset.scale[0]) && isFinite(portalOffset.scale[1]) && isFinite(portalOffset.scale[2])) {
         vrPresentState.glContext.setTopStencilGeometry(
-          stencilGeometry.slice(1, 1 + stencilGeometrySize),
           GlobalContext.xrState,
           window.document.portalOffset
         );
@@ -1075,7 +1080,7 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
         vrPresentState.glContext.setTopStencilGeometry(null);
       }
     }
-  };
+  }; */
   const _tickLocalRafs = () => {
     if (rafCbs.length > 0) {
       _cacheLocalCbs(rafCbs);
@@ -1098,12 +1103,12 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
       _clearLocalCbs(); // release garbage
     }
   };
-  const _composeXrContext = (context, windowHandle) => {
+  const _composeXrContext = (context, windowHandle, layered) => {
     if (vrPresentState.glContext) {
       nativeWindow.composeLayers(vrPresentState.glContext, vrPresentState.layers, GlobalContext.xrState);
     }
 
-    if (vrPresentState.hmdType === 'fake' || vrPresentState.hmdType === 'oculus' || vrPresentState.hmdType === 'openvr') {
+    if (!context.canvas.ownerDocument.hidden && (vrPresentState.hmdType === 'fake' || vrPresentState.hmdType === 'oculus' || vrPresentState.hmdType === 'openvr')) {
       // NOTE: we blit from fbo instead of msFbo, so this will be lagged by a frame in the multisample case
       if (GlobalContext.xrState.aaEnabled[0]) { // fbo will not be bound by default in the aaEnabled case
         nativeWindow.bindVrChildFbo(vrPresentState.glContext, vrPresentState.fbo, GlobalContext.xrState.tex[0], GlobalContext.xrState.depthTex[0]);
@@ -1112,9 +1117,16 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
       const height = GlobalContext.xrState.renderHeight[0];
       const {width: dWidth, height: dHeight} = nativeWindow.getFramebufferSize(windowHandle);
       nativeWindow.blitChildFrameBuffer(context, vrPresentState.fbo, 0, width, height, dWidth, dHeight, true, false, false);
-
-      _swapBuffers(context, windowHandle);
     }
+    if (!layered) {
+      const width = GlobalContext.xrState.renderWidth[0]*2;
+      const height = GlobalContext.xrState.renderHeight[0];
+      // const {width: dWidth, height: dHeight} = nativeWindow.getFramebufferSize(windowHandle);
+
+      nativeWindow.blitChildFrameBuffer(context, vrPresentState.glContext.framebuffer.msFbo, vrPresentState.glContext.framebuffer.fbo, width, height, width, height, true, false, false);
+    }
+    
+    _swapBuffers(context, windowHandle);
   };
   const _composeNormalContext = (context, windowHandle) => {
     if (!context.canvas.ownerDocument.hidden) {
@@ -1138,7 +1150,7 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
       const context = contexts[i];
       const isDirty = (!!context.isDirty && context.isDirty()) || context === vrPresentState.glContext;
       if (isDirty) {
-        if (layered) {
+        // if (layered) {
           const windowHandle = context.getWindowHandle();
 
           nativeWindow.setCurrentWindowContext(windowHandle);
@@ -1147,7 +1159,7 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
           } */
 
           if (context === vrPresentState.glContext) {
-            _composeXrContext(context, windowHandle);
+            _composeXrContext(context, windowHandle, layered);
           } else {
             _composeNormalContext(context, windowHandle);
           }
@@ -1163,14 +1175,12 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
               context.bindFramebuffer(context.READ_FRAMEBUFFER, readFramebuffer);
             }
           } */
+        // }
+        
+        context.clearDirty();
 
-          context.clearDirty();
-
-          if (context.finish) {
-            syncs.push(nativeWindow.getSync());
-          }
-        } else {
-          context.clearDirty();
+        if (context.finish) {
+          syncs.push(nativeWindow.getSync());
         }
       }
     }
@@ -1179,7 +1189,7 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
   };
   const _renderLocal = (syncs, layered) => {
     _waitLocalSyncs(syncs);
-    _prepareLocalFrame();
+    // _prepareLocalFrame();
     _tickLocalRafs();
     return _composeLocalLayers(layered);
   };
@@ -1235,15 +1245,15 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
     };
     const _onmakeswapchain = context => {
       if (context !== vrPresentState.glContext) {
-        if (vrPresentState.glContext) {
+        /* if (vrPresentState.glContext) {
           vrPresentState.glContext.setTopLevel(true);
-        }
+        } */
 
         vrPresentState.glContext = context;
         vrPresentState.fbo = context.createFramebuffer().id;
         vrPresentState.msFbo = context.createFramebuffer().id;
-        vrPresentState.glContext.setTopLevel(false);
-        
+        // vrPresentState.glContext.setTopLevel(false);
+
         window.document.emit('domchange'); // open mirror window
       }
 
@@ -1366,7 +1376,11 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
   window.document = _parseDocument(options.htmlString, window);
   window.document.hidden = options.hidden || false;
   window.document.xrOffset = options.xrOffsetBuffer ? new XRRigidTransform(options.xrOffsetBuffer) : new XRRigidTransform();
-  window.document.portalOffset = options.portalOffsetBuffer ? new XRRigidTransform(options.portalOffsetBuffer) : new XRRigidTransform();
+  window.document.portalOffset = options.portalOffsetBuffer ? new XRRigidTransform(options.portalOffsetBuffer) : (() => {
+    const portalOffset = new XRRigidTransform();
+    portalOffset.scale.set(Float32Array.from([Infinity, Infinity, Infinity]));
+    return portalOffset;
+  })();
 })(global);
 
 global.onrunasync = req => {
