@@ -21,18 +21,117 @@ let container, scene, camera, session, controllerMeshes, layers, tutorialIframe,
 const localVector = new THREE.Vector3();
 const localVector2 = new THREE.Vector3();
 const localQuaternion = new THREE.Quaternion();
+const localMatrix = new THREE.Matrix4();
 
 const stencilVsh = `
+  varying vec3 vWorldPos;
   void main() {
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
+    vWorldPos = position;
   }
 `;
 const stencilFsh = `
   uniform sampler2D uTex;
+  uniform sampler2D uDepthTex;
   uniform vec2 uTexSize;
+  uniform vec4 uPlane;
+  varying vec3 vWorldPos;
+  uniform mat4 projectionMatrix;
+  uniform mat4 projectionMatrixInverse;
+  uniform mat4 pmi;
+  uniform mat4 mwi;
+  uniform mat4 modelMatrix;
+  uniform mat4 modelViewMatrixInverse;
+  uniform mat4 matrixWorld;
+  uniform mat4 matrixWorldInverse;
+  uniform mat4 cameraMatrixWorld;
+  uniform mat4 objectMatrixWorldInverse;
+  uniform mat4 modelViewMatrix;
+  uniform mat4 matrixViewInverse;
+  vec4 calculate_view_position(vec2 texture_coordinate, float depth_from_depth_buffer) {
+    vec3 clip_space_position = vec3(texture_coordinate, depth_from_depth_buffer) * 2.0 - 1.0;
+
+    /* vec4 view_position = vec4(
+      vec2(projectionMatrixInverse[0][0], projectionMatrixInverse[1][1]) * clip_space_position.xy,
+      -1.0,
+      projectionMatrixInverse[2][3] * clip_space_position.z + projectionMatrixInverse[3][3]
+    ); */
+    vec4 view_position = pmi * vec4(clip_space_position, 1.0);
+
+    return view_position;
+    // return view_position.xyz / view_position.w;
+  }
   void main() {
-    gl_FragColor = texture2D(uTex, gl_FragCoord.xy / uTexSize);
-    gl_FragColor.r += 0.2;
+    vec2 texCoord = gl_FragCoord.xy / uTexSize;
+    vec2 texCoordFull = vec2(mod(texCoord.x, 0.5) * 2.0, texCoord.y);
+    vec2 ndc = (texCoordFull * 2.0) - 1.0;
+    // vec2 ndc = texCoordFull;
+    // vec2 ndc = texCoordFull;
+
+    // vec2 xy = (position.xy + 1.0) / 2.0; //in [0,1] range
+    // vec2 xy = texCoord;
+    float z_b = texture2D(uDepthTex, texCoord).r;
+    float z_n = 2.0 * z_b - 1.0;
+    float zNear = projectionMatrix[3][2] / (projectionMatrix[2][2] - 1.0);
+    float zFar = projectionMatrix[3][2] / (projectionMatrix[2][2] + 1.0);
+    // float zNear = 0.1;
+    // float zFar = 10000.0;
+    float z_e = 2.0 * zNear * zFar / (zFar + zNear - z_n * (zFar - zNear));
+    
+    // float a = zFar / (zFar - zNear);
+    // float b = zFar * zNear / (zNear - zFar);
+    // float z_e = a + b / z_b;
+    
+    // float linear = zNear / (zFar - z_n * (zFar - zNear)) * zFar;
+    // float z_e = (linear * 2.0) - 1.0;
+    
+    // float zOrig = z_e;
+    // vec4 offset = projectionMatrix * vec4(0.0, 0.0, z_e, 1.0);
+    // vec4 worldPosOrig = matrixViewInverse * projectionMatrixInverse * (vec4(texCoordFull, z_e, 1.0) * 2.0 - 1.0);
+    // worldPosOrig /= worldPosOrig.w;
+    /* // worldPosOrig.xyz /= worldPosOrig.w;
+    // worldPosOrig = cameraMatrixWorld * worldPosOrig;
+    // worldPosOrig = objectMatrixWorldInverse * worldPosOrig;
+
+    worldPosOrig = cameraMatrixWorld * worldPosOrig;
+    worldPosOrig = objectMatrixWorldInverse * worldPosOrig;
+    
+    worldPosOrig /= worldPosOrig.w; */
+    
+    vec4 worldPos = calculate_view_position(texCoordFull, z_b);
+    // worldPos.z *= -1.;
+    // vec3 worldPos2 = worldPos.xyz / worldPos.w;
+    worldPos /= worldPos.w;
+    // worldPos2.z *= -1.;
+    worldPos = mwi * worldPos;
+    // worldPos2.z = z_e;
+    // worldPos.z = 2.0 * zNear * zFar / (zFar + zNear - worldPos.z * (zFar - zNear));
+    // worldPos = (matrixViewInverse * vec4(worldPos, 1.0)).xyz;
+    // worldPos.z = offset.z/offset.w;
+    // worldPos.z = -(worldPos.z + 1.0);
+
+    /* vec4 worldPosNew = modelMatrix * worldPosOrig;
+    vec4 viewPosNew = viewMatrix * worldPosOrig; */
+
+    // worldPos /= worldPos.w;
+
+    // gl_FragColor = vec4(vec3(z_b), 1.0);
+    /* worldPos.z = z_e;
+    if (worldPos.z > 1.0 || worldPos.z < 0.0) {
+      worldPos = vec3(1.0);
+    } */
+
+    // gl_FragColor = vec4(worldPos.xyz, 1.0);
+    if (dot(worldPos.xyz, uPlane.xyz) <= uPlane.w) {
+      gl_FragColor = texture2D(uTex, texCoord);
+    } else {
+      // gl_FragColor.r = 0.2;
+      discard;
+      // gl_FragColor = vec4(0., 0., 0., 1.);
+      // gl_FragColor = vec4(projectionMatrixInverse[0][0], projectionMatrixInverse[0][1], projectionMatrixInverse[0][2], 1.0);
+    }
+    gl_FragDepth = min(gl_FragCoord.z, z_b);
+    // gl_FragColor.rgb += worldPos.xyz * 0.2;
   }
 `;
 
@@ -59,13 +158,13 @@ function init() {
   webxrSampleIframe = document.createElement('iframe');
   // webxrSampleIframe.d = 3;
   webxrSampleIframe.src = 'https://rawcdn.githack.com/exokitxr/webxr-samples/a8e2c94eba0ee5c9215f20d13057b6c25675d9b0/xr-presentation.html';
-  webxrSampleIframe.position = [0, 0, -1];
+  webxrSampleIframe.position = [0, 0, -0.5];
   /* webxrSampleIframe.portalOffset.position.set(Float32Array.from([0, 1, 0]));
   webxrSampleIframe.portalOffset.orientation.set(Float32Array.from([0, 0, 0, 1]));
   webxrSampleIframe.portalOffset.scale.set(Float32Array.from([2, 2, 1])); */
 
   tutorialIframe = document.createElement('iframe');
-  tutorialIframe.position = [0, 0, 1.1];
+  tutorialIframe.position = [0, 0, 0.5 - 0.1];
   // tutorialIframe.d = 3;
   tutorialIframe.src = 'tutorial.html';
 
@@ -95,7 +194,7 @@ function init() {
     geometry.addAttribute('position', new THREE.BufferAttribute(ps3, 3));
     return geometry;
   })();
-  const _makePortalMesh = (position, quaternion, scale) => {
+  const _makePortalMesh = (position, quaternion, scale, iframe) => {
     const geometry = portalGeometry;
     const material = new THREE.ShaderMaterial({
 
@@ -104,9 +203,25 @@ function init() {
           type: 't',
           value: null,
         },
+        uDepthTex: {
+          type: 't',
+          value: null,
+        },
         uTexSize: {
           type: 'v2',
           value: new THREE.Vector2(),
+        },
+        uPlane: {
+          type: 'v4',
+          value: new THREE.Vector4(),
+        },
+        pmi: {
+          type: 'm4',
+          value: new THREE.Matrix4(),
+        },
+        mwi: {
+          type: 'm4',
+          value: new THREE.Matrix4(),
         },
       },
 
@@ -122,12 +237,36 @@ function init() {
     mesh.quaternion.copy(quaternion);
     mesh.scale.copy(scale);
     mesh.box = new THREE.Box3().setFromCenterAndSize(mesh.position, mesh.scale);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+      new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion),
+      position.clone().add(new THREE.Vector3(0, 0, scale.z/2).applyQuaternion(quaternion))
+    );
+    mesh.material.uniforms.uPlane.value.x = plane.normal.x;
+    mesh.material.uniforms.uPlane.value.y = plane.normal.y;
+    mesh.material.uniforms.uPlane.value.z = plane.normal.z;
+    mesh.material.uniforms.uPlane.value.w = plane.constant;
+    mesh.onBeforeRender = function(renderer, scene, camera, geometry, material, group) {
+      /* if (renderer.vr.enabled) {
+        camera = renderer.vr.getCamera(camera).cameras[0];
+      } */
+      material.uniforms.pmi.value
+        .fromArray(GlobalContext.xrState.leftProjectionMatrix)
+        .multiply(localMatrix.fromArray(iframe.xrOffset.matrix))
+        .getInverse(material.uniforms.pmi.value);
+
+      // material.uniforms.mwi.value.copy(camera.matrixWorld);
+      material.uniforms.mwi.value.fromArray(GlobalContext.xrState.leftViewMatrix);
+      // material.uniforms.mwi.value.copy(this.matrixWorld);
+      // material.uniforms.mwi.value.copy(camera.matrixWorldInverse).multiply(this.matrixWorld);
+      material.uniforms.mwi.value.getInverse(material.uniforms.mwi.value);
+    };
+    // console.log('got plane', mesh.material.uniforms.uPlane.value);
     return mesh;
   };
-  portalMesh = _makePortalMesh(new THREE.Vector3(0, 0.9, 0), new THREE.Quaternion(), new THREE.Vector3(1, 2, 1));
+  portalMesh = _makePortalMesh(new THREE.Vector3(0, 0, -0.5), new THREE.Quaternion(), new THREE.Vector3(3, 3, 1), webxrSampleIframe);
   portalMesh.visible = true;
   scene.add(portalMesh);
-  portalMesh2 = _makePortalMesh(new THREE.Vector3(0, 0.9, 1), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)), new THREE.Vector3(1, 2, 1));
+  portalMesh2 = _makePortalMesh(new THREE.Vector3(0, 0, 0.5), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)), new THREE.Vector3(3, 3, 1), tutorialIframe);
   portalMesh2.visible = false;
   scene.add(portalMesh2);
 
@@ -174,24 +313,46 @@ function animate(time, frame) {
   if (webxrSampleIframe.contentWindow && webxrSampleIframe.contentWindow.framebuffer) {
     const {tex, width, height} = webxrSampleIframe.contentWindow.framebuffer;
     if (!portalMesh.material.uniforms.uTex.value) {
-      const texture = new THREE.Texture(
-        null,
-        THREE.UVMapping,
-        THREE.ClampToEdgeWrapping,
-        THREE.ClampToEdgeWrapping,
-        THREE.LinearFilter,
-        THREE.LinearFilter,
-        THREE.RGBAFormat,
-        THREE.UnsignedByteType,
-        16
-      );
-      const properties = renderer.properties.get(texture);
-      properties.__webglTexture = {
-        id: webxrSampleIframe.contentWindow.framebuffer.tex,
-      };
-      properties.__webglInit = true;
+      {
+        const texture = new THREE.Texture(
+          null,
+          THREE.UVMapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.LinearFilter,
+          THREE.LinearFilter,
+          THREE.RGBAFormat,
+          THREE.UnsignedByteType,
+          16
+        );
+        const properties = renderer.properties.get(texture);
+        properties.__webglTexture = {
+          id: webxrSampleIframe.contentWindow.framebuffer.tex,
+        };
+        properties.__webglInit = true;
 
-      portalMesh.material.uniforms.uTex.value = texture;
+        portalMesh.material.uniforms.uTex.value = texture;
+      }
+      {
+        const texture = new THREE.Texture(
+          null,
+          THREE.UVMapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.LinearFilter,
+          THREE.LinearFilter,
+          THREE.DepthStencilFormat,
+          THREE.UnsignedInt248Type,
+          16
+        );
+        const properties = renderer.properties.get(texture);
+        properties.__webglTexture = {
+          id: webxrSampleIframe.contentWindow.framebuffer.depthTex,
+        };
+        properties.__webglInit = true;
+
+        portalMesh.material.uniforms.uDepthTex.value = texture;
+      }
     }
 
     portalMesh.material.uniforms.uTexSize.value.set(width, height);
@@ -199,24 +360,46 @@ function animate(time, frame) {
   if (tutorialIframe.contentWindow && tutorialIframe.contentWindow.framebuffer) {
     const {tex, width, height} = tutorialIframe.contentWindow.framebuffer;
     if (!portalMesh2.material.uniforms.uTex.value) {
-      const texture = new THREE.Texture(
-        null,
-        THREE.UVMapping,
-        THREE.ClampToEdgeWrapping,
-        THREE.ClampToEdgeWrapping,
-        THREE.LinearFilter,
-        THREE.LinearFilter,
-        THREE.RGBAFormat,
-        THREE.UnsignedByteType,
-        16
-      );
-      const properties = renderer.properties.get(texture);
-      properties.__webglTexture = {
-        id: tutorialIframe.contentWindow.framebuffer.tex,
-      };
-      properties.__webglInit = true;
+      {
+        const texture = new THREE.Texture(
+          null,
+          THREE.UVMapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.LinearFilter,
+          THREE.LinearFilter,
+          THREE.RGBAFormat,
+          THREE.UnsignedByteType,
+          16
+        );
+        const properties = renderer.properties.get(texture);
+        properties.__webglTexture = {
+          id: tutorialIframe.contentWindow.framebuffer.tex,
+        };
+        properties.__webglInit = true;
 
-      portalMesh2.material.uniforms.uTex.value = texture;
+        portalMesh2.material.uniforms.uTex.value = texture;
+      }
+      {
+        const texture = new THREE.Texture(
+          null,
+          THREE.UVMapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.ClampToEdgeWrapping,
+          THREE.LinearFilter,
+          THREE.LinearFilter,
+          THREE.DepthStencilFormat,
+          THREE.UnsignedInt248Type,
+          16
+        );
+        const properties = renderer.properties.get(texture);
+        properties.__webglTexture = {
+          id: tutorialIframe.contentWindow.framebuffer.depthTex,
+        };
+        properties.__webglInit = true;
+
+        portalMesh2.material.uniforms.uDepthTex.value = texture;
+      }
     }
 
     portalMesh2.material.uniforms.uTexSize.value.set(width, height);

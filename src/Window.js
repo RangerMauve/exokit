@@ -1124,6 +1124,7 @@ const _makeRequestAnimationFrame = window => (fn, priority = 0) => {
       // const {width: dWidth, height: dHeight} = nativeWindow.getFramebufferSize(windowHandle);
 
       nativeWindow.blitChildFrameBuffer(context, vrPresentState.glContext.framebuffer.msFbo, vrPresentState.glContext.framebuffer.fbo, width, height, width, height, true, false, false);
+      nativeWindow.blitChildFrameBuffer(context, vrPresentState.glContext.framebuffer.msFbo, vrPresentState.glContext.framebuffer.fbo, width, height, width, height, false, true, true);
     }
     
     _swapBuffers(context, windowHandle);
@@ -1498,6 +1499,7 @@ global.onrunasync = req => {
       return Promise.reject(new Error(`invalid window async request: ${JSON.stringify(req)}`));
   }
 };
+window.GlobalContext = GlobalContext;
 global.onexit = () => {
   const localContexts = contexts.slice();
   for (let i = 0; i < localContexts.length; i++) {
